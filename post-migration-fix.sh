@@ -211,16 +211,11 @@ else
     log_warning "No .ssh directory found"
 fi
 
-# 7. Reload shell configuration
+# 7. Shell configuration note
 log_info "=========================================="
-log_info "Reloading Shell Configuration"
+log_info "Shell Configuration"
 log_info "=========================================="
-
-if [ -f "${HOME}/.zshrc" ]; then
-    log_info "Sourcing .zshrc..."
-    source "${HOME}/.zshrc"
-    log_success "Shell configuration reloaded"
-fi
+log_info "Open a new terminal window to pick up .zshrc changes"
 
 # 8. Fix LaunchAgent plist files
 log_info "=========================================="
