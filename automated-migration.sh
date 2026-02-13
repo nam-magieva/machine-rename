@@ -104,11 +104,16 @@ log_info "═══════════════════════�
 log_info "PHASE 1: Running Pre-Migration Backup"
 log_info "═══════════════════════════════════════════════════════════════"
 
-"${SCRIPT_DIR}/pre-migration-v2.sh" --name="${NEW_USERNAME}" --host="${NEW_HOSTNAME}"
+if [ "${SKIP_BACKUP}" = "true" ]; then
+    log_warning "Skipping backup (--skip-backup flag set)"
+    log_warning "Make sure you have a backup from a previous run!"
+else
+    "${SCRIPT_DIR}/pre-migration-v2.sh" --name="${NEW_USERNAME}" --host="${NEW_HOSTNAME}"
 
-if [ $? -ne 0 ]; then
-    log_error "Pre-migration backup failed!"
-    exit 1
+    if [ $? -ne 0 ]; then
+        log_error "Pre-migration backup failed!"
+        exit 1
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════

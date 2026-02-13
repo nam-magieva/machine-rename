@@ -30,6 +30,10 @@ parse_args() {
                 DRY_RUN=true
                 shift
                 ;;
+            --skip-backup)
+                SKIP_BACKUP=true
+                shift
+                ;;
             --help|-h)
                 show_usage
                 exit 0
@@ -54,6 +58,7 @@ Required Arguments:
 Optional Arguments:
   --machine-id=ID       Machine identifier (default: derived from hostname)
   --dry-run             Test without making changes
+  --skip-backup         Skip Phase 1 backup (use when retrying a failed migration)
   -h, --help            Show this help message
 
 Examples:
@@ -122,6 +127,7 @@ VERIFY_NETWORK=true
 
 REQUIRE_CONFIRMATION=true
 DRY_RUN=false
+SKIP_BACKUP=false
 IDEMPOTENT_MODE=true
 
 # ═══════════════════════════════════════════════════════════════
@@ -362,7 +368,7 @@ print_config_summary() {
 export OLD_USERNAME NEW_USERNAME OLD_HOSTNAME NEW_HOSTNAME MACHINE_ID
 export BACKUP_ROOT LOG_FILE KEEP_OLD_BACKUPS
 export VERIFY_CLAUDE VERIFY_GIT VERIFY_SSH VERIFY_GCLOUD VERIFY_DOCKER VERIFY_NETWORK
-export REQUIRE_CONFIRMATION DRY_RUN IDEMPOTENT_MODE
+export REQUIRE_CONFIRMATION DRY_RUN SKIP_BACKUP IDEMPOTENT_MODE
 export RED GREEN YELLOW BLUE MAGENTA CYAN NC
 
 # ═══════════════════════════════════════════════════════════════
