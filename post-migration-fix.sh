@@ -32,15 +32,16 @@ fi
 
 log_success "Running as correct user: ${CURRENT_USER}"
 
-# Verify home directory
-if [ "${HOME}" != "/Users/${NEW_USERNAME}" ]; then
+# Verify home directory (may still be old path via symlink, or already updated)
+REAL_HOME=$(cd "${HOME}" && pwd -P)
+if [ "${REAL_HOME}" != "/Users/${NEW_USERNAME}" ] && [ "${HOME}" != "/Users/${NEW_USERNAME}" ]; then
     log_error "Home directory mismatch!"
     log_error "Expected: /Users/${NEW_USERNAME}"
-    log_error "Actual: ${HOME}"
+    log_error "Actual: ${HOME} (real: ${REAL_HOME})"
     exit 1
 fi
 
-log_success "Home directory correct: ${HOME}"
+log_success "Home directory correct: ${REAL_HOME}"
 
 # 1. Fix Claude Code symlinks
 log_info "=========================================="
@@ -50,16 +51,18 @@ log_info "=========================================="
 if [ -d "${HOME}/.claude" ]; then
     cd "${HOME}/.claude"
 
-    # Define symlinks to fix
-    declare -A SYMLINKS=(
-        ["agents"]="/Users/${NEW_USERNAME}/.claude-config/agents"
-        ["CLAUDE.md"]="/Users/${NEW_USERNAME}/.claude-config/shared/CLAUDE.md"
-        ["settings.json"]="/Users/${NEW_USERNAME}/.claude-config/shared/settings.json"
-        ["skills"]="/Users/${NEW_USERNAME}/.claude-config/skills"
+    # Define symlinks to fix (parallel arrays to avoid declare -A issues)
+    LINK_NAMES=("agents" "CLAUDE.md" "settings.json" "skills")
+    LINK_TARGETS=(
+        "/Users/${NEW_USERNAME}/.claude-config/agents"
+        "/Users/${NEW_USERNAME}/.claude-config/shared/CLAUDE.md"
+        "/Users/${NEW_USERNAME}/.claude-config/shared/settings.json"
+        "/Users/${NEW_USERNAME}/.claude-config/skills"
     )
 
-    for link_name in "${!SYMLINKS[@]}"; do
-        target="${SYMLINKS[$link_name]}"
+    for i in "${!LINK_NAMES[@]}"; do
+        link_name="${LINK_NAMES[$i]}"
+        target="${LINK_TARGETS[$i]}"
 
         # Remove old symlink if it exists
         if [ -L "${link_name}" ]; then
@@ -128,7 +131,9 @@ if [ -f "${HOME}/.zshrc" ]; then
     log_info "Checking .zshrc for hardcoded paths..."
 
     # Count occurrences (excluding the line with API key)
-    OLD_PATH_COUNT=$(grep -c "/Users/${OLD_USERNAME}" "${HOME}/.zshrc" 2>/dev/null || echo "0")
+    OLD_PATH_COUNT=$(grep -c "/Users/${OLD_USERNAME}" "${HOME}/.zshrc" 2>/dev/null || true)
+    OLD_PATH_COUNT=${OLD_PATH_COUNT:-0}
+    OLD_PATH_COUNT=$(echo "${OLD_PATH_COUNT}" | tr -d '[:space:]')
 
     if [ "${OLD_PATH_COUNT}" -gt 0 ]; then
         log_warning "Found ${OLD_PATH_COUNT} references to old username in .zshrc"
@@ -139,7 +144,9 @@ if [ -f "${HOME}/.zshrc" ]; then
         # Replace old paths (be careful with API keys)
         sed -i '' "s|/Users/${OLD_USERNAME}|/Users/${NEW_USERNAME}|g" "${HOME}/.zshrc"
 
-        NEW_COUNT=$(grep -c "/Users/${OLD_USERNAME}" "${HOME}/.zshrc" 2>/dev/null || echo "0")
+        NEW_COUNT=$(grep -c "/Users/${OLD_USERNAME}" "${HOME}/.zshrc" 2>/dev/null || true)
+        NEW_COUNT=${NEW_COUNT:-0}
+        NEW_COUNT=$(echo "${NEW_COUNT}" | tr -d '[:space:]')
         if [ "${NEW_COUNT}" -eq 0 ]; then
             log_success ".zshrc paths updated"
         else
@@ -372,7 +379,8 @@ log_info "Checking for old username references..."
 REMAINING_REFS=$(grep -r "/Users/${OLD_USERNAME}" \
     "${HOME}/.zshrc" \
     "${HOME}/.config" \
-    2>/dev/null | wc -l || echo "0")
+    2>/dev/null | wc -l | tr -d '[:space:]' || true)
+REMAINING_REFS=${REMAINING_REFS:-0}
 
 if [ "${REMAINING_REFS}" -eq 0 ]; then
     log_success "No old username references found"
