@@ -263,6 +263,34 @@ if [ "\$(whoami)" != "${TEMP_ADMIN_USER}" ]; then
     exit 1
 fi
 
+# ── Detect current state (supports retrying after a failed attempt) ──
+RECORD_RENAMED=false
+HOMEDIR_UPDATED=false
+HOMEDIR_MOVED=false
+
+# Check if RecordName was already changed to new username
+if id "\${NEW_USER}" &>/dev/null; then
+    RECORD_RENAMED=true
+    echo "  ℹ️  RecordName already changed to \${NEW_USER} (from previous attempt)"
+fi
+
+# Check if NFSHomeDirectory already points to new path
+if [ "\${RECORD_RENAMED}" = "true" ]; then
+    CURRENT_HOMEDIR=\$(sudo dscl . -read /Users/\${NEW_USER} NFSHomeDirectory 2>/dev/null | awk '{print \$2}')
+else
+    CURRENT_HOMEDIR=\$(sudo dscl . -read /Users/\${OLD_USER} NFSHomeDirectory 2>/dev/null | awk '{print \$2}')
+fi
+if [ "\${CURRENT_HOMEDIR}" = "/Users/\${NEW_USER}" ]; then
+    HOMEDIR_UPDATED=true
+    echo "  ℹ️  NFSHomeDirectory already points to /Users/\${NEW_USER}"
+fi
+
+# Check if home directory was already moved
+if [ -d "/Users/\${NEW_USER}" ] && [ ! -d "/Users/\${OLD_USER}" ]; then
+    HOMEDIR_MOVED=true
+    echo "  ℹ️  Home directory already at /Users/\${NEW_USER}"
+fi
+
 # Safety check: Old user must not be logged in
 if who | grep -q "\${OLD_USER}"; then
     echo "ERROR: User '\${OLD_USER}' is still logged in!"
@@ -270,38 +298,39 @@ if who | grep -q "\${OLD_USER}"; then
     exit 1
 fi
 
-# Safety check: New user must not already exist
-if id "\${NEW_USER}" &>/dev/null; then
-    echo "ERROR: User '\${NEW_USER}' already exists!"
-    exit 1
-fi
-
-# Safety check: Old home must exist
-if [ ! -d "/Users/\${OLD_USER}" ]; then
-    echo "ERROR: Home directory /Users/\${OLD_USER} not found!"
-    exit 1
-fi
-
-# Safety check: New home must NOT exist (unless it's a partial copy from a failed attempt)
-if [ -d "/Users/\${NEW_USER}" ]; then
-    echo "⚠️  Directory /Users/\${NEW_USER} already exists!"
-    echo "  This is likely a partial copy from a previous failed migration attempt."
+# Clean up partial copy from failed attempt (both dirs exist)
+if [ -d "/Users/\${NEW_USER}" ] && [ -d "/Users/\${OLD_USER}" ]; then
+    echo "⚠️  Both /Users/\${OLD_USER} and /Users/\${NEW_USER} exist!"
+    echo "  This is a partial copy from a previous failed migration attempt."
     echo ""
     echo "  /Users/\${OLD_USER} size: \$(du -sh /Users/\${OLD_USER} 2>/dev/null | cut -f1)"
     echo "  /Users/\${NEW_USER} size: \$(du -sh /Users/\${NEW_USER} 2>/dev/null | cut -f1)"
     echo ""
-    read -p "  Delete /Users/\${NEW_USER} to free space and retry? (type 'yes'): " cleanup_confirm
+    echo "  The partial copy at /Users/\${NEW_USER} must be removed."
+    echo "  (The original at /Users/\${OLD_USER} will be renamed, not copied.)"
+    echo ""
+    read -p "  Delete partial copy /Users/\${NEW_USER}? (type 'yes'): " cleanup_confirm
     if [ "\${cleanup_confirm}" = "yes" ]; then
         echo "  Removing partial copy..."
         sudo rm -rf /Users/\${NEW_USER}
         echo "  ✅ Partial copy removed. Free space recovered."
     else
-        echo "  Cannot proceed with existing directory. Exiting."
+        echo "  Cannot proceed with both directories. Exiting."
         exit 1
     fi
 fi
 
-echo "All safety checks passed"
+# Safety check: Old home must exist (unless already moved)
+if [ "\${HOMEDIR_MOVED}" = "false" ] && [ ! -d "/Users/\${OLD_USER}" ]; then
+    echo "ERROR: Home directory /Users/\${OLD_USER} not found!"
+    exit 1
+fi
+
+echo ""
+echo "Migration state detected:"
+echo "  RecordName renamed:    \${RECORD_RENAMED}"
+echo "  NFSHomeDirectory set:  \${HOMEDIR_UPDATED}"
+echo "  Home directory moved:  \${HOMEDIR_MOVED}"
 echo ""
 read -p "Proceed with user rename? (type 'yes' to continue): " confirm
 if [ "\${confirm}" != "yes" ]; then
@@ -311,47 +340,55 @@ fi
 
 # ── Step 1/5: Update home directory pointer in Directory Services ──
 echo ""
-echo "Step 1/5: Updating home directory path in user record..."
-if ! sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${OLD_USER} /Users/\${NEW_USER}; then
-    echo "❌ ERROR: Failed to update NFSHomeDirectory"
-    exit 1
+if [ "\${HOMEDIR_UPDATED}" = "true" ]; then
+    echo "Step 1/5: NFSHomeDirectory already updated — skipping"
+else
+    echo "Step 1/5: Updating home directory path in user record..."
+    # Use the correct record path (may already be renamed)
+    DSCL_USER=\${OLD_USER}
+    if [ "\${RECORD_RENAMED}" = "true" ]; then
+        DSCL_USER=\${NEW_USER}
+    fi
+    if ! sudo dscl . -change /Users/\${DSCL_USER} NFSHomeDirectory /Users/\${OLD_USER} /Users/\${NEW_USER}; then
+        echo "❌ ERROR: Failed to update NFSHomeDirectory"
+        exit 1
+    fi
+    echo "✅ Home directory path updated in database"
 fi
-echo "✅ Home directory path updated in database"
 
 # ── Step 2/5: Rename the home directory ──
 echo ""
-echo "Step 2/5: Renaming home directory..."
-echo "  Stripping ACL on /Users/\${OLD_USER} (macOS puts 'group:everyone deny delete' on home dirs)..."
-sudo chmod -N /Users/\${OLD_USER}
+if [ "\${HOMEDIR_MOVED}" = "true" ]; then
+    echo "Step 2/5: Home directory already at /Users/\${NEW_USER} — skipping"
+else
+    echo "Step 2/5: Renaming home directory..."
+    echo "  Stripping ACL on /Users/\${OLD_USER} (macOS puts 'group:everyone deny delete' on home dirs)..."
+    sudo chmod -N /Users/\${OLD_USER}
 
-if ! sudo mv /Users/\${OLD_USER} /Users/\${NEW_USER}; then
-    echo "❌ ERROR: Failed to move home directory"
-    echo "  Rolling back NFSHomeDirectory change..."
-    sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${NEW_USER} /Users/\${OLD_USER}
-    echo "  Restoring ACL..."
-    sudo chmod +a "group:everyone deny delete" /Users/\${OLD_USER}
-    echo "  Rollback complete. Please investigate the error."
-    exit 1
+    if ! sudo mv /Users/\${OLD_USER} /Users/\${NEW_USER}; then
+        echo "❌ ERROR: Failed to move home directory"
+        echo "  Restoring ACL..."
+        sudo chmod +a "group:everyone deny delete" /Users/\${OLD_USER}
+        echo "  Please investigate the error."
+        exit 1
+    fi
+    echo "  Restoring ACL on /Users/\${NEW_USER}..."
+    sudo chmod +a "group:everyone deny delete" /Users/\${NEW_USER}
+    echo "✅ Home directory renamed"
 fi
-echo "  Restoring ACL on /Users/\${NEW_USER}..."
-sudo chmod +a "group:everyone deny delete" /Users/\${NEW_USER}
-echo "✅ Home directory renamed"
 
 # ── Step 3/5: Rename the user account (RecordName) ──
 echo ""
-echo "Step 3/5: Renaming user account..."
-if ! sudo dscl . -change /Users/\${OLD_USER} RecordName \${OLD_USER} \${NEW_USER}; then
-    echo "❌ ERROR: Failed to rename user account"
-    echo "  Rolling back home directory move..."
-    sudo chmod -N /Users/\${NEW_USER}
-    sudo mv /Users/\${NEW_USER} /Users/\${OLD_USER}
-    sudo chmod +a "group:everyone deny delete" /Users/\${OLD_USER}
-    echo "  Rolling back NFSHomeDirectory..."
-    sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${NEW_USER} /Users/\${OLD_USER}
-    echo "  Rollback complete. Please investigate the error."
-    exit 1
+if [ "\${RECORD_RENAMED}" = "true" ]; then
+    echo "Step 3/5: RecordName already \${NEW_USER} — skipping"
+else
+    echo "Step 3/5: Renaming user account..."
+    if ! sudo dscl . -change /Users/\${OLD_USER} RecordName \${OLD_USER} \${NEW_USER}; then
+        echo "❌ ERROR: Failed to rename user account"
+        exit 1
+    fi
+    echo "✅ User account renamed"
 fi
-echo "✅ User account renamed"
 
 # ── Step 4/5: Create compatibility symlink ──
 echo ""
