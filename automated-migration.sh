@@ -202,8 +202,25 @@ EOF
         exit 1
     fi
 else
-    log_warning "Temporary admin already exists - using existing account"
-    log_warning "If you forgot the password, delete the account and re-run"
+    log_warning "Temporary admin '${TEMP_ADMIN_USER}' already exists"
+    TEMP_ADMIN_PASS="123456"
+
+    log_info "Resetting password to: ${TEMP_ADMIN_PASS}"
+    sudo dscl . -passwd "/Users/${TEMP_ADMIN_USER}" "${TEMP_ADMIN_PASS}"
+    log_success "Password reset to ${TEMP_ADMIN_PASS}"
+
+    # Update credentials file
+    cat > "${HOME}/migration-credentials.txt" <<EOF
+Temporary Admin Credentials
+============================
+Username: ${TEMP_ADMIN_USER}
+Password: ${TEMP_ADMIN_PASS}
+Updated: $(date)
+
+IMPORTANT: Delete this file after migration is complete.
+EOF
+    chmod 600 "${HOME}/migration-credentials.txt"
+    log_success "Credentials saved to: ${HOME}/migration-credentials.txt"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -260,10 +277,23 @@ if [ ! -d "/Users/\${OLD_USER}" ]; then
     exit 1
 fi
 
-# Safety check: New home must NOT exist
+# Safety check: New home must NOT exist (unless it's a partial copy from a failed attempt)
 if [ -d "/Users/\${NEW_USER}" ]; then
-    echo "ERROR: Directory /Users/\${NEW_USER} already exists!"
-    exit 1
+    echo "⚠️  Directory /Users/\${NEW_USER} already exists!"
+    echo "  This is likely a partial copy from a previous failed migration attempt."
+    echo ""
+    echo "  /Users/\${OLD_USER} size: \$(du -sh /Users/\${OLD_USER} 2>/dev/null | cut -f1)"
+    echo "  /Users/\${NEW_USER} size: \$(du -sh /Users/\${NEW_USER} 2>/dev/null | cut -f1)"
+    echo ""
+    read -p "  Delete /Users/\${NEW_USER} to free space and retry? (type 'yes'): " cleanup_confirm
+    if [ "\${cleanup_confirm}" = "yes" ]; then
+        echo "  Removing partial copy..."
+        sudo rm -rf /Users/\${NEW_USER}
+        echo "  ✅ Partial copy removed. Free space recovered."
+    else
+        echo "  Cannot proceed with existing directory. Exiting."
+        exit 1
+    fi
 fi
 
 echo "All safety checks passed"
