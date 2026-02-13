@@ -215,7 +215,143 @@ if [ -f "${HOME}/.zshrc" ]; then
     log_success "Shell configuration reloaded"
 fi
 
-# 8. List remaining issues
+# 8. Fix LaunchAgent plist files
+log_info "=========================================="
+log_info "Fixing LaunchAgent Plist Files"
+log_info "=========================================="
+
+if [ -d "${HOME}/Library/LaunchAgents" ]; then
+    log_info "Checking for LaunchAgent plists with old username..."
+
+    PLIST_COUNT=$(find "${HOME}/Library/LaunchAgents" -name "*.plist" -type f | wc -l | tr -d ' ')
+
+    if [ "${PLIST_COUNT}" -gt 0 ]; then
+        log_info "Found ${PLIST_COUNT} LaunchAgent plist files"
+
+        # Update paths in all plist files
+        find "${HOME}/Library/LaunchAgents" -name "*.plist" -type f -exec \
+            sed -i '' "s|/Users/${OLD_USERNAME}|/Users/${NEW_USERNAME}|g" {} \;
+
+        log_success "Updated paths in LaunchAgent plists"
+
+        # Reload LaunchAgents
+        log_info "Reloading LaunchAgents..."
+        for plist in "${HOME}/Library/LaunchAgents"/*.plist; do
+            if [ -f "${plist}" ]; then
+                launchctl unload "${plist}" 2>/dev/null || true
+                launchctl load "${plist}" 2>/dev/null || true
+            fi
+        done
+        log_success "LaunchAgents reloaded"
+    else
+        log_info "No LaunchAgent plists found"
+    fi
+else
+    log_info "No LaunchAgents directory found"
+fi
+
+# 9. Fix Claude Code config (.claude.json)
+log_info "=========================================="
+log_info "Fixing Claude Code Configuration"
+log_info "=========================================="
+
+if [ -f "${HOME}/.claude.json" ]; then
+    log_info "Updating paths in .claude.json..."
+
+    # Check if file contains old username
+    if grep -q "/Users/${OLD_USERNAME}" "${HOME}/.claude.json" 2>/dev/null; then
+        cp "${HOME}/.claude.json" "${HOME}/.claude.json.pre-migration-backup"
+        sed -i '' "s|/Users/${OLD_USERNAME}|/Users/${NEW_USERNAME}|g" "${HOME}/.claude.json"
+        log_success "Updated paths in .claude.json"
+
+        # Also update backup files
+        for backup in "${HOME}"/.claude.json.backup*; do
+            if [ -f "${backup}" ]; then
+                sed -i '' "s|/Users/${OLD_USERNAME}|/Users/${NEW_USERNAME}|g" "${backup}" 2>/dev/null || true
+            fi
+        done
+        log_success "Updated backup files"
+    else
+        log_success ".claude.json looks good (no old paths found)"
+    fi
+else
+    log_warning "No .claude.json file found"
+fi
+
+# 10. Fix GCloud virtualenv
+log_info "=========================================="
+log_info "Fixing GCloud SDK Virtual Environment"
+log_info "=========================================="
+
+if [ -d "${HOME}/.config/gcloud/virtenv" ]; then
+    log_warning "GCloud virtualenv has hardcoded paths"
+    log_info "Removing old virtualenv..."
+
+    rm -rf "${HOME}/.config/gcloud/virtenv"
+    log_success "Old virtualenv removed"
+    log_info "GCloud will recreate virtualenv on next use"
+else
+    log_info "No GCloud virtualenv found"
+fi
+
+# 11. Fix Docker configs
+log_info "=========================================="
+log_info "Fixing Docker Configuration"
+log_info "=========================================="
+
+if [ -d "${HOME}/.docker" ]; then
+    log_info "Checking Docker configs for old paths..."
+
+    # Update paths in Docker config files
+    if find "${HOME}/.docker" -type f \( -name "*.toml" -o -name "*.json" \) -exec grep -l "/Users/${OLD_USERNAME}" {} \; 2>/dev/null | grep -q .; then
+        log_info "Updating Docker config paths..."
+        find "${HOME}/.docker" -type f \( -name "*.toml" -o -name "*.json" \) \
+            -exec sed -i '' "s|/Users/${OLD_USERNAME}|/Users/${NEW_USERNAME}|g" {} \; 2>/dev/null || true
+        log_success "Docker configs updated"
+    else
+        log_success "Docker configs look good"
+    fi
+
+    # Clean Docker build cache (optional but recommended)
+    log_info "Cleaning Docker build cache..."
+    rm -rf "${HOME}/.docker/buildx/refs" 2>/dev/null || true
+    rm -rf "${HOME}/.docker/docker-next" 2>/dev/null || true
+    log_success "Docker build cache cleaned"
+else
+    log_info "No Docker directory found"
+fi
+
+# 12. Clean Claude Code cache directories
+log_info "=========================================="
+log_info "Cleaning Claude Code Cache"
+log_info "=========================================="
+
+log_info "Removing old cache directories..."
+CACHE_CLEANED=0
+
+if [ -d "${HOME}/.claude/debug" ]; then
+    rm -rf "${HOME}/.claude/debug"
+    CACHE_CLEANED=$((CACHE_CLEANED + 1))
+fi
+
+if [ -d "${HOME}/.claude/file-history" ]; then
+    rm -rf "${HOME}/.claude/file-history"
+    CACHE_CLEANED=$((CACHE_CLEANED + 1))
+fi
+
+if [ -d "${HOME}/.claude/paste-cache" ]; then
+    rm -rf "${HOME}/.claude/paste-cache"
+    CACHE_CLEANED=$((CACHE_CLEANED + 1))
+fi
+
+if [ ${CACHE_CLEANED} -gt 0 ]; then
+    log_success "Cleaned ${CACHE_CLEANED} cache directories"
+    log_info "Claude Code will recreate these with correct paths"
+else
+    log_info "No cache directories to clean"
+fi
+
+# 13. List remaining issues
 log_info "=========================================="
 log_info "Checking for Remaining Issues"
 log_info "=========================================="
@@ -253,6 +389,11 @@ log_info "=========================================="
 log_success "✅ Username: ${NEW_USERNAME}"
 log_success "✅ Home directory: ${HOME}"
 log_success "✅ Claude Code symlinks: Fixed"
+log_success "✅ LaunchAgent plists: Fixed"
+log_success "✅ Claude Code config (.claude.json): Fixed"
+log_success "✅ GCloud virtualenv: Recreated"
+log_success "✅ Docker configs: Fixed"
+log_success "✅ Claude cache: Cleaned"
 log_success "✅ File ownership: Fixed"
 log_success "✅ SSH permissions: Fixed"
 
