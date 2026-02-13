@@ -85,7 +85,26 @@ else
     log_warning "No .claude directory found"
 fi
 
-# 2. Fix file ownership
+# 2. Fix display name (RealName)
+log_info "=========================================="
+log_info "Fixing Display Name"
+log_info "=========================================="
+
+if [ -n "${NEW_FULLNAME:-}" ]; then
+    CURRENT_REALNAME=$(sudo dscl . -read /Users/${NEW_USERNAME} RealName 2>/dev/null | sed 's/RealName: //' || echo "")
+    if [ "${CURRENT_REALNAME}" != "${NEW_FULLNAME}" ]; then
+        log_info "Updating display name: '${CURRENT_REALNAME}' → '${NEW_FULLNAME}'"
+        sudo dscl . -create /Users/${NEW_USERNAME} RealName "${NEW_FULLNAME}"
+        log_success "Display name updated to: ${NEW_FULLNAME}"
+    else
+        log_success "Display name already correct: ${NEW_FULLNAME}"
+    fi
+else
+    log_info "No --fullname provided — display name unchanged"
+    log_info "To change: sudo dscl . -create /Users/${NEW_USERNAME} RealName \"Your Name\""
+fi
+
+# 3. Fix file ownership
 log_info "=========================================="
 log_info "Fixing File Ownership"
 log_info "=========================================="
@@ -94,7 +113,7 @@ log_info "Fixing ownership of home directory..."
 sudo chown -R "${NEW_USERNAME}:staff" "${HOME}"
 log_success "Ownership fixed"
 
-# 3. Fix GCloud SDK (if exists)
+# 4. Fix GCloud SDK (if exists)
 log_info "=========================================="
 log_info "Fixing GCloud SDK"
 log_info "=========================================="

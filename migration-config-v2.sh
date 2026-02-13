@@ -30,6 +30,10 @@ parse_args() {
                 OLD_USERNAME="${1#*=}"
                 shift
                 ;;
+            --fullname=*)
+                NEW_FULLNAME="${1#*=}"
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -61,6 +65,7 @@ Required Arguments:
 
 Optional Arguments:
   --old-name=USERNAME   Override old username (auto-detected from $HOME)
+  --fullname=NAME       New display name (e.g., "Minion Kevin")
   --machine-id=ID       Machine identifier (default: derived from hostname)
   --dry-run             Test without making changes
   --skip-backup         Skip Phase 1 backup (use when retrying a failed migration)
@@ -107,6 +112,7 @@ OLD_HOSTNAME="${OLD_HOSTNAME:-${CURRENT_HOSTNAME}}"
 # New identity - will be overridden by command-line args
 NEW_USERNAME="${NEW_USERNAME:-}"
 NEW_HOSTNAME="${NEW_HOSTNAME:-}"
+NEW_FULLNAME="${NEW_FULLNAME:-}"
 MACHINE_ID="${MACHINE_ID:-}"
 
 # ═══════════════════════════════════════════════════════════════
@@ -377,7 +383,7 @@ print_config_summary() {
 # EXPORT VARIABLES
 # ═══════════════════════════════════════════════════════════════
 
-export OLD_USERNAME NEW_USERNAME OLD_HOSTNAME NEW_HOSTNAME MACHINE_ID
+export OLD_USERNAME NEW_USERNAME NEW_FULLNAME OLD_HOSTNAME NEW_HOSTNAME MACHINE_ID
 export BACKUP_ROOT LOG_FILE KEEP_OLD_BACKUPS
 export VERIFY_CLAUDE VERIFY_GIT VERIFY_SSH VERIFY_GCLOUD VERIFY_DOCKER VERIFY_NETWORK
 export REQUIRE_CONFIRMATION DRY_RUN SKIP_BACKUP IDEMPOTENT_MODE

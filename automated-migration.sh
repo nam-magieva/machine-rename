@@ -364,6 +364,8 @@ if [ "\${HOMEDIR_MOVED}" = "true" ]; then
     echo "Step 2/5: Home directory already at /Users/\${NEW_USER} — skipping"
 else
     echo "Step 2/5: Renaming home directory..."
+    echo "  Removing file flags on /Users/\${OLD_USER}..."
+    sudo chflags nouchg,noschg,norestricted /Users/\${OLD_USER} 2>/dev/null || true
     echo "  Stripping ACL on /Users/\${OLD_USER} (macOS puts 'group:everyone deny delete' on home dirs)..."
     sudo chmod -N /Users/\${OLD_USER}
 
@@ -392,18 +394,39 @@ else
     echo "✅ User account renamed"
 fi
 
-# ── Step 4/5: Create compatibility symlink ──
+# ── Step 4/6: Fix ownership (MUST run before login works) ──
 echo ""
-echo "Step 4/5: Creating compatibility symlink..."
-sudo ln -s /Users/\${NEW_USER} /Users/\${OLD_USER}
-echo "✅ Symlink created: /Users/\${OLD_USER} → /Users/\${NEW_USER}"
-echo "  (Apps with hardcoded old paths will still work)"
-
-# ── Step 5/5: Fix ownership ──
-echo ""
-echo "Step 5/5: Fixing ownership..."
+echo "Step 4/6: Fixing ownership..."
 sudo chown -R \${NEW_USER}:staff /Users/\${NEW_USER}
-echo "✅ Ownership fixed"
+echo "  Restoring ACL on home directory..."
+sudo chmod +a "group:everyone deny delete" /Users/\${NEW_USER} 2>/dev/null || true
+echo "✅ Ownership and ACL fixed"
+
+# ── Step 5/6: Create compatibility symlink ──
+echo ""
+echo "Step 5/6: Creating compatibility symlink..."
+if [ -L "/Users/\${OLD_USER}" ]; then
+    echo "  Symlink already exists — skipping"
+elif [ -d "/Users/\${OLD_USER}" ]; then
+    echo "  ⚠️  /Users/\${OLD_USER} is a directory (not a symlink) — skipping"
+    echo "  (This is expected if home dir was already moved)"
+else
+    sudo ln -s /Users/\${NEW_USER} /Users/\${OLD_USER}
+    echo "✅ Symlink created: /Users/\${OLD_USER} → /Users/\${NEW_USER}"
+    echo "  (Apps with hardcoded old paths will still work)"
+fi
+
+# ── Step 6/6: Update display name (RealName) ──
+echo ""
+DESIRED_FULLNAME="${NEW_FULLNAME}"
+if [ -n "\${DESIRED_FULLNAME}" ]; then
+    echo "Step 6/6: Updating display name to '\${DESIRED_FULLNAME}'..."
+    sudo dscl . -create /Users/\${NEW_USER} RealName "\${DESIRED_FULLNAME}"
+    echo "✅ Display name updated to: \${DESIRED_FULLNAME}"
+else
+    echo "Step 6/6: No --fullname provided — display name unchanged"
+    echo "  To change later: sudo dscl . -create /Users/\${NEW_USER} RealName \"Your Name\""
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
