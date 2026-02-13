@@ -36,12 +36,14 @@ log_info "═══════════════════════�
 
 # Check 1: Running as target user (not root, not temp admin)
 CURRENT_USER=$(whoami)
-if [ "${CURRENT_USER}" != "${OLD_USERNAME}" ]; then
-    log_error "Must run as user: ${OLD_USERNAME}"
+# whoami may return the new name if RecordName was already changed by a
+# previous attempt, so accept either old or new username here.
+if [ "${CURRENT_USER}" != "${OLD_USERNAME}" ] && [ "${CURRENT_USER}" != "${NEW_USERNAME}" ]; then
+    log_error "Must run as user: ${OLD_USERNAME} (or ${NEW_USERNAME} if already renamed)"
     log_error "Current user: ${CURRENT_USER}"
     exit 1
 fi
-log_success "Running as correct user: ${CURRENT_USER}"
+log_success "Running as correct user: ${CURRENT_USER} (old home: /Users/${OLD_USERNAME})"
 
 # Check 2: Check if temp admin already exists
 if id "${TEMP_ADMIN_USER}" &>/dev/null; then

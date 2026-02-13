@@ -26,6 +26,10 @@ parse_args() {
                 MACHINE_ID="${1#*=}"
                 shift
                 ;;
+            --old-name=*)
+                OLD_USERNAME="${1#*=}"
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -56,6 +60,7 @@ Required Arguments:
   --host=HOSTNAME       New hostname (e.g., minion-stuart, minion-kevin)
 
 Optional Arguments:
+  --old-name=USERNAME   Override old username (auto-detected from $HOME)
   --machine-id=ID       Machine identifier (default: derived from hostname)
   --dry-run             Test without making changes
   --skip-backup         Skip Phase 1 backup (use when retrying a failed migration)
@@ -84,8 +89,15 @@ EOF
 CURRENT_USERNAME=$(whoami)
 CURRENT_HOSTNAME=$(scutil --get ComputerName 2>/dev/null || hostname -s)
 
+# Detect actual old username from $HOME directory path.
+# If a previous attempt already changed the dscl RecordName, whoami returns
+# the new name even though the user is still in their old session.
+# $HOME still reflects the original home directory path and is reliable.
+HOME_DERIVED_USERNAME=$(basename "${HOME}")
+
 # Old identity (will be current if migrating, or can be overridden)
-OLD_USERNAME="${OLD_USERNAME:-${CURRENT_USERNAME}}"
+# Priority: explicit --old-name > $HOME-derived > whoami
+OLD_USERNAME="${OLD_USERNAME:-${HOME_DERIVED_USERNAME}}"
 OLD_HOSTNAME="${OLD_HOSTNAME:-${CURRENT_HOSTNAME}}"
 
 # ═══════════════════════════════════════════════════════════════
