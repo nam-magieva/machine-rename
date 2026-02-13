@@ -156,8 +156,8 @@ log_info "═══════════════════════�
 if ! id "${TEMP_ADMIN_USER}" &>/dev/null; then
     log_info "Will create temporary admin account: ${TEMP_ADMIN_USER}"
 
-    # Generate random password
-    TEMP_ADMIN_PASS=$(openssl rand -base64 12 | tr -d "=+/" | cut -c1-12)
+    # Fixed password for temp admin
+    TEMP_ADMIN_PASS="123456"
 
     log_info "Temporary password: ${TEMP_ADMIN_PASS}"
     log_warning "⚠️  WRITE THIS DOWN: ${TEMP_ADMIN_PASS}"
@@ -274,23 +274,60 @@ if [ "\${confirm}" != "yes" ]; then
     exit 1
 fi
 
+# ── Step 1/5: Update home directory pointer in Directory Services ──
 echo ""
-echo "Step 1/4: Renaming user account..."
-sudo dscl . -change /Users/\${OLD_USER} RecordName \${OLD_USER} \${NEW_USER}
-echo "✅ User account renamed"
-
-echo ""
-echo "Step 2/4: Updating home directory path in user record..."
-sudo dscl . -change /Users/\${NEW_USER} NFSHomeDirectory /Users/\${OLD_USER} /Users/\${NEW_USER}
+echo "Step 1/5: Updating home directory path in user record..."
+if ! sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${OLD_USER} /Users/\${NEW_USER}; then
+    echo "❌ ERROR: Failed to update NFSHomeDirectory"
+    exit 1
+fi
 echo "✅ Home directory path updated in database"
 
+# ── Step 2/5: Rename the home directory ──
 echo ""
-echo "Step 3/4: Moving home directory (this may take a few minutes)..."
-sudo mv /Users/\${OLD_USER} /Users/\${NEW_USER}
-echo "✅ Home directory moved"
+echo "Step 2/5: Renaming home directory..."
+echo "  Stripping ACL on /Users/\${OLD_USER} (macOS puts 'group:everyone deny delete' on home dirs)..."
+sudo chmod -N /Users/\${OLD_USER}
 
+if ! sudo mv /Users/\${OLD_USER} /Users/\${NEW_USER}; then
+    echo "❌ ERROR: Failed to move home directory"
+    echo "  Rolling back NFSHomeDirectory change..."
+    sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${NEW_USER} /Users/\${OLD_USER}
+    echo "  Restoring ACL..."
+    sudo chmod +a "group:everyone deny delete" /Users/\${OLD_USER}
+    echo "  Rollback complete. Please investigate the error."
+    exit 1
+fi
+echo "  Restoring ACL on /Users/\${NEW_USER}..."
+sudo chmod +a "group:everyone deny delete" /Users/\${NEW_USER}
+echo "✅ Home directory renamed"
+
+# ── Step 3/5: Rename the user account (RecordName) ──
 echo ""
-echo "Step 4/4: Fixing ownership..."
+echo "Step 3/5: Renaming user account..."
+if ! sudo dscl . -change /Users/\${OLD_USER} RecordName \${OLD_USER} \${NEW_USER}; then
+    echo "❌ ERROR: Failed to rename user account"
+    echo "  Rolling back home directory move..."
+    sudo chmod -N /Users/\${NEW_USER}
+    sudo mv /Users/\${NEW_USER} /Users/\${OLD_USER}
+    sudo chmod +a "group:everyone deny delete" /Users/\${OLD_USER}
+    echo "  Rolling back NFSHomeDirectory..."
+    sudo dscl . -change /Users/\${OLD_USER} NFSHomeDirectory /Users/\${NEW_USER} /Users/\${OLD_USER}
+    echo "  Rollback complete. Please investigate the error."
+    exit 1
+fi
+echo "✅ User account renamed"
+
+# ── Step 4/5: Create compatibility symlink ──
+echo ""
+echo "Step 4/5: Creating compatibility symlink..."
+sudo ln -s /Users/\${NEW_USER} /Users/\${OLD_USER}
+echo "✅ Symlink created: /Users/\${OLD_USER} → /Users/\${NEW_USER}"
+echo "  (Apps with hardcoded old paths will still work)"
+
+# ── Step 5/5: Fix ownership ──
+echo ""
+echo "Step 5/5: Fixing ownership..."
 sudo chown -R \${NEW_USER}:staff /Users/\${NEW_USER}
 echo "✅ Ownership fixed"
 
